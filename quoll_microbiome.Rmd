@@ -34,10 +34,14 @@ expected<-c(15.7,10.4,10.0,18.8,15.9,4.6,11.3,13.3)
 observed_expected<-cbind(observed,expected) %>% select(sseqid, observed, expected)
 melt(observed_expected) %>% 
   ggplot(aes(x=sseqid,y=value, fill=variable))+geom_bar(stat="identity", position="dodge") + theme(axis.text.x = element_text(angle = 45, hjust = 1))+
-  labs(x="Mock community species", y="Relative abundance (%)",title="Observed vs Expected Frequencies of Species in the Mock Community")+
+  labs(x="Zymo mock community species", y="Relative abundance (%)",title="Observed vs Expected Frequencies of Species in the Zymo Mock Community")+
   theme(legend.title=element_blank())
-observed_expected<-observed_expected %>% mutate(fc=observed/expected) %>% 
+observed_expected_log2fc<-observed_expected %>% mutate(fc=observed/expected) %>% 
   mutate(log2fc=log2(fc))
+
+ggplot(observed_expected_log2fc, aes(x=sseqid,y=log2fc))+geom_bar(stat="identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  labs(x="Zymo mock community species", y="Log2 fold change",title="Log2 fold change of Observed vs Expected Frequencies of Species in the Zymo Mock Community")+
+  theme(legend.title=element_blank())
 
 #Now HMP
 hmp_mock_blast<-read.delim("data/mock_hmp_blast.txt",header=TRUE, sep="\t")
@@ -60,13 +64,17 @@ observed_expected_hmp<- hmp_mock_97 %>% mutate(PCR1=HMP1/sum(HMP1)*100) %>%
   mutate(PCR2=HMP2/sum(HMP2)*100) %>% mutate(expected=rep(5,20)) %>% select(sseqid,PCR1,PCR2,expected)
 
 melt(observed_expected_hmp) %>%
-  ggplot(aes(x=sseqid,y=value, fill=variable))+geom_bar(stat="identity", position="dodge")+ theme(axis.text.x = element_text(angle = 90, face= "italic"))
+  ggplot(aes(x=sseqid,y=value, fill=variable))+geom_bar(stat="identity", position="dodge")+ theme(axis.text.x = element_text(angle = 90, hjust = 1, face = "italic"))+
+  labs(x="HMP mock community species", y="Relative abundance (%)",title="Observed vs Expected Frequencies of Species in the HMP Mock Community")+
+  theme(legend.title=element_blank())
 
 hmp_oe_log2fc<-observed_expected_hmp %>% mutate(fc1=PCR1/expected) %>% mutate(fc2=PCR2/expected) %>% mutate(log2fc1=log2(fc1)) %>% 
   mutate(log2fc2=log2(fc2)) %>% select(sseqid, log2fc1, log2fc2)
 
 melt(hmp_oe_log2fc) %>%
-  ggplot(aes(x=sseqid,y=value, fill=variable))+geom_bar(stat="identity",position="dodge") + theme(axis.text.x = element_text(angle = 90, face= "italic"))
+  ggplot(aes(x=sseqid,y=value, fill=factor(variable, labels=c("PCR1","PCR2"))))+geom_bar(stat="identity",position="dodge") + theme(axis.text.x = element_text(angle = 90, hjust = 1, face = "italic"))+
+  labs(x="HMP mock community species", y="Log2 fold change",title="Log2 fold change of Observed vs Expected Frequencies\n of Species in the HMP Mock Community")+
+  theme(legend.title=element_blank()) 
 ```
 
 This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
