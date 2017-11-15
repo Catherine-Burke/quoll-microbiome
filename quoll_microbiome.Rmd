@@ -77,13 +77,162 @@ melt(hmp_oe_log2fc) %>%
   theme(legend.title=element_blank()) 
 ```
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+```{r, mock community R1 only}
+#Repeating above analysis on blast results from R1 (v4 region) only to see if this improves the results.
+zymo_mock_blast_r1<-read.delim("data/v4_mock_zymo_blast.txt",header=TRUE, sep="\t")
+#Calculate proportion of seqs with < 97% identity to reference
+(z_v4_less_97<-zymo_mock_blast_r1 %>%
+  filter(pident<97) %>%
+  nrow()/nrow(zymo_mock_blast_r1))
+z_v4_mock_97<-zymo_mock_blast_r1 %>% 
+  filter(pident>=97.000) %>%
+  arrange(sseqid,desc(pident)) %>% group_by(sseqid, pident) %>%
+  summarise(n=n()) %>%
+  group_by(sseqid) %>%
+  summarise(counts=sum(n))
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+#Calculate observed vs expected frequency of taxa for hits > 97% identity to a reference.
+observed_z_v4<- z_v4_mock_97 %>% mutate(observed=counts/sum(counts)*100)
+expected<-c(15.7,10.4,10.0,18.8,15.9,4.6,11.3,13.3)
+observed_expected_z_v4<-cbind(observed_z_v4,expected) %>% select(sseqid, observed, expected)
+melt(observed_expected_z_v4) %>% 
+  ggplot(aes(x=sseqid,y=value, fill=variable))+geom_bar(stat="identity", position="dodge") + theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  labs(x="Zymo mock community species", y="Relative abundance (%)",title="Observed vs Expected Frequencies of Species\n in the Zymo Mock Community Read 1")+
+  theme(legend.title=element_blank())
+z_v4_observed_expected_log2fc<-observed_expected_z_v4 %>% mutate(fc=observed/expected) %>% 
+  mutate(log2fc=log2(fc))
 
-```{r cars}
-summary(cars)
+ggplot(z_v4_observed_expected_log2fc, aes(x=sseqid,y=log2fc))+geom_bar(stat="identity") + theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  labs(x="Zymo mock community species", y="Log2 fold change",title="Log2 fold change of Observed vs Expected Frequencies\n of Species in the Zymo Mock Community Read 1")+
+  theme(legend.title=element_blank())
+
+#Now HMP
+v4_hmp_mock_blast<-read.delim("data/v4_mock_hmp_blast.txt",header=TRUE, sep="\t")
+#Calculate proportion of seqs with < 97% identity to reference
+(v4_less_97_hmp<-v4_hmp_mock_blast %>%
+  filter(pident<97) %>%
+  nrow()/nrow(v4_hmp_mock_blast))
+
+#Matches with > 97% similarity
+v4_hmp_mock_97<-v4_hmp_mock_blast %>% 
+  mutate(PCRrun = ifelse(grepl("HMP1_[0-9]+",query),"HMP1","HMP2")) %>%
+  filter(pident>97) %>%
+  arrange(sseqid,desc(pident)) %>% group_by(sseqid, pident,PCRrun) %>%
+  summarise(n=n()) %>%
+  group_by(sseqid,PCRrun) %>%
+  summarise(counts=sum(n)) %>%
+  dcast(sseqid~PCRrun) %>%
+  mutate(HMP1 = ifelse(is.na(HMP1),0,HMP1))
+
+v4_observed_expected_hmp<- v4_hmp_mock_97 %>% mutate(PCR1=HMP1/sum(HMP1)*100) %>%
+  mutate(PCR2=HMP2/sum(HMP2)*100) %>% mutate(expected=rep(5,20)) %>% select(sseqid,PCR1,PCR2,expected)
+
+melt(v4_observed_expected_hmp) %>%
+  ggplot(aes(x=sseqid,y=value, fill=variable))+geom_bar(stat="identity", position="dodge")+ theme(axis.text.x = element_text(angle = 90, hjust = 1, face = "italic"))+
+  labs(x="HMP mock community species", y="Relative abundance (%)",title="Observed vs Expected Frequencies of Species in the HMP Mock Community\n Read 1")+
+  theme(legend.title=element_blank())
+
+v4_hmp_oe_log2fc<-v4_observed_expected_hmp %>% mutate(fc1=PCR1/expected) %>% mutate(fc2=PCR2/expected) %>% mutate(log2fc1=log2(fc1)) %>% 
+  mutate(log2fc2=log2(fc2)) %>% select(sseqid, log2fc1, log2fc2)
+
+melt(v4_hmp_oe_log2fc) %>%
+  ggplot(aes(x=sseqid,y=value, fill=factor(variable, labels=c("PCR1","PCR2"))))+geom_bar(stat="identity",position="dodge") + theme(axis.text.x = element_text(angle = 90, hjust = 1, face = "italic"))+
+  labs(x="HMP mock community species", y="Log2 fold change",title="Log2 fold change of Observed vs Expected Frequencies\n of Species in the HMP Mock Community, Read 1")+ theme(legend.title=element_blank()) + ylim(-2,2)
 ```
+
+##Import data
+
+```{r import data to phyloseq}
+quolls_v4_biom<-"data/v4_json.biom"
+quolls_v4_map<-sample_data(read.table("data/mapping_V4.txt",header=TRUE, stringsAsFactors=TRUE, sep="\t", row.names=1))
+quolls_v4_tree<-read_tree("data/v4_rep_set.tre")
+
+quolls_v4<-import_biom(quolls_v4_biom, treefilename = quolls_v4_tree, parseFunction = parse_taxonomy_default)
+
+quolls_v4<-merge_phyloseq(quolls_v4, quolls_v4_map)
+colnames(tax_table(quolls_v4)) = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species")
+```
+##Filtering
+
+```{r, quality filtering}
+#remove unused index combos
+sums<-(as.data.frame(sort(sample_sums(quolls_v4))))
+#subset to negative controls
+negs<-subset_samples(quolls_v4, Type %in% c("elution_neg","PCR_neg","field_neg"))
+negs_smelt<-psmelt(negs)
+negs_smelt %>% group_by(Sample, Phylum) %>% 
+  mutate(phylum_sum=sum(Abundance)) %>%
+  filter(phylum_sum>10) %>%
+  ggplot(aes(x=Sample,y=Abundance, fill=Phylum))+
+  geom_bar(stat="identity")+facet_grid(.~Type, scales="free") + 
+  theme(axis.text.x=element_text(angle=90)) +
+  labs(title="Phyla with more than 10 counts in any one sample in\nnegative controls")
+
+quolls_v4_1<-subset_samples(quolls_v4, !(run_prefix %in% c(grep("unused",run_prefix, value=TRUE))))
+quolls_v4_2<-subset_samples(quolls_v4_1, sample_sums(quolls_v4_1)>=25000)
+quolls_v4_3<-subset_samples(quolls_v4_2, run_prefix!="N8")
+sort(sample_sums(quolls_v4_3))
+
+quolls_rare<-rarefy_even_depth(quolls_v4_3, sample.size=25289, replace=FALSE, rngseed=TRUE)
+
+quolls_rare
+
+quolls_rare_ra<-transform_sample_counts(quolls_rare, function(x) x / sum(x))
+
+```
+##Taxa summaries
+
+```{r taxa summaries}
+quolls_ra_smelt<-psmelt(quolls_rare_ra)
+quolls_ra_smelt %>% ggplot(aes(x=Sample, y=Abundance, fill=Phylum)) + geom_bar(stat="identity") + facet_grid(.~Type, scales="free")
+
+quolls_ra_smelt %>% filter(Type=="quoll") %>% group_by(Sample,Phylum) %>%
+  mutate(phy_sum=sum(Abundance)) %>% filter(phy_sum>0.01) %>%
+  ggplot(aes(x=Sample, y=Abundance, fill=Phylum)) + geom_bar(stat="identity") +
+  facet_grid(.~swab_site, scales="free") +
+  theme(axis.text.x=element_text(angle=90)) +
+  labs(title="Phyla in quolls samples", y="% relative abudnance")
+
+quolls_ra_smelt %>% filter(Type=="quoll") %>% group_by(Sample,Genus) %>%
+  mutate(gen_sum=sum(Abundance)) %>% filter(gen_sum>0.05) %>%
+  ggplot(aes(x=Sample, y=Abundance, fill=Genus)) + geom_bar(stat="identity") +
+  facet_grid(.~swab_site, scales="free") +
+  theme(axis.text.x=element_text(angle=90)) +
+  labs(title="Genera in quolls samples", y="% relative abudnance")
+
+
+#look at sample where PCR band was strong
+quolls_ra_smelt %>% filter(PCR.band.on.gel=="Y") %>%
+  filter(!run_prefix %in% c("HMP1","HMP2")) %>%
+  group_by(Sample,Phylum) %>%
+  mutate(phy_sum=sum(Abundance)) %>% filter(phy_sum>0.01) %>%
+  ggplot(aes(x=Sample, y=Abundance, fill=Phylum)) + geom_bar(stat="identity") +
+  facet_grid(.~swab_site, scales="free") +
+  theme(axis.text.x=element_text(angle=90)) +
+  labs(title="Phyla of samples with PCR band",y="% relative abudnance")
+
+quolls_ra_smelt %>% filter(PCR.band.on.gel=="Y") %>%
+  filter(!run_prefix %in% c("HMP1","HMP2")) %>% 
+  group_by(Sample,Genus) %>%
+  mutate(gen_sum=sum(Abundance)) %>% filter(gen_sum>0.01) %>%
+  ggplot(aes(x=Sample, y=Abundance, fill=Genus)) + geom_bar(stat="identity") +
+  facet_grid(.~swab_site, scales="free") +
+  theme(axis.text.x=element_text(angle=90))+
+  labs(title="Genera of samples with PCR band",y="% relative abudnance")
+
+as.data.frame(quolls_ra_smelt %>% filter(PCR.band.on.gel=="Y") %>% group_by(Sample,Genus) %>%
+  mutate(gen_sum=sum(Abundance)) %>% filter(gen_sum>0.01) %>%
+  summarise(gen_sum=(sum(Abundance))))
+#Looks at samples with low coverage and compare profiles.
+low<-subset_samples(quolls_v4_1, sample_sums(quolls_v4_1)<13000)
+
+low_smelt<-psmelt(low)
+
+low_smelt %>% filter(Abundance>10) %>% ggplot(aes(x=Sample, y=Abundance, fill=Phylum)) + geom_bar(stat="identity") +
+  facet_grid(.~swab_site, scales="free") +
+  theme(axis.text.x=element_text(angle=90))
+```
+
 
 ## Including Plots
 
